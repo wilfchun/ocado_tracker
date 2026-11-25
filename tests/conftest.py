@@ -1,6 +1,6 @@
 import os
 import subprocess
-from pathlib import Path
+import sys
 
 import pytest
 from sqlalchemy import text
@@ -21,9 +21,7 @@ def pg_engine():
         conn.execute(text("CREATE SCHEMA public"))
     env = dict(os.environ, DATABASE_URL=url)
     env.pop("DATABASE_URL_FILE", None)
-    subprocess.run(
-        [str(Path(".venv/bin/alembic").resolve()), "upgrade", "head"], env=env, check=True
-    )
+    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], env=env, check=True)
     yield engine
     engine.dispose()
 

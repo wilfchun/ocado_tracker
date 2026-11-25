@@ -24,7 +24,8 @@ it reproduces the documented product-table structure, five representative rows,
 30 lines, 34 units and documented monetary totals; the remaining names and values
 are synthetic. Summary labels and ISO explicit date wording are adapter contracts,
 not verified against the unavailable original HTML. Review a real sample privately
-before backfilling. Unknown monetary table rows fail for review. Only `delivery is
+before backfilling. Unknown monetary table rows and unsupported adjustment/substitution wording outside
+the product table fail for review, including explanatory wording requiring review. Only `delivery is
 today`/`delivery today` with a timezone-aware source timestamp, or an explicit
 `delivery date: YYYY-MM-DD` / `delivery on YYYY-MM-DD`, are supported.
 
@@ -134,3 +135,159 @@ validation reject invented slugs and malformed responses. Each request times out
 after 15 seconds; a command handles at most 1000 products (default 100). Failures
 leave products unclassified. Financial ingestion never calls the model; run
 classification separately. No brand, SKU or pack-size guesses are stored.
+
+## NixOS deployment
+
+`nix build` builds the CLI and its bundled migrations; `nix flake check` also
+checks the NixOS module. The flake supports aarch64-linux and x86_64-linux and
+pins nixpkgs `1412caf7bf9e660f2f962917c14b1ea1c3bc695e`. Python's uv lock and
+nixpkgs each pin their own dependency closure; tests run in both environments.
+
+Add this flake as `inputs.household-purchases` in the server flake, then:
+
+```nix
+{ inputs, ... }: {
+  imports = [ inputs.household-purchases.nixosModules.default ];
+  services.household-purchases = {
+    enable = true;
+    databaseUrlFile = "/run/secrets/purchases-db-url";
+    fastmailTokenFile = "/run/secrets/fastmail-jmap";
+    syncSchedule = "hourly";
+    # classificationSchedule = null; # disables the separate daily timer
+    # llm = { enable = true; baseUrl = "http://127.0.0.1:8080/v1"; model = "your-model"; };
+  };
+}
+```
+
+Secrets must be runtime absolute **string paths**, never Nix path literals or
+`builtins.readFile` secret values. sops-nix/agenix may provide these paths. systemd
+LoadCredential makes private copies readable by the dedicated unprivileged user.
+The module creates a private persistent data directory, hardens both oneshot
+services, and opens no firewall ports. Sync and classification have separate
+timers; model failure cannot fail ingestion. Same-unit timers cannot overlap;
+the shared database lock protects CLI/import/reprocess/migration writes too.
+Custom `dataDir`, timezone, filters and optional model API-key paths are supported.
+
+Provision database roles as the PostgreSQL administrator:
+
+```
+psql -v ON_ERROR_STOP=1 -f scripts/bootstrap-roles.sql postgres
+psql -v ON_ERROR_STOP=1 postgres -c 'CREATE DATABASE household_purchases OWNER purchases_owner'
+```
+
+Set login passwords separately with `psql`'s `\password` or use authenticated
+local peer mappings in the host's existing PostgreSQL setup. Do not expose
+PostgreSQL publicly. Configure the importer URL with `postgresql+psycopg` driver,
+private host/socket, database and **purchases_importer** role. Use a different
+0600 URL file for the **purchases_owner** role for migrations.
+
+For each upgrade, stop both timers and wait for active jobs, back up, then run
+`DATABASE_URL_FILE=/private/owner-url household-purchases migrate` explicitly as
+an operator able to read that credential. Reapply grants as owner/admin:
+
+```
+psql -v ON_ERROR_STOP=1 household_purchases -f scripts/grants.sql
+```
+
+Start timers only after migrations succeed. Never give the runtime importer or
+Metabase schema ownership. The writer has DML on purchase/source/catalogue tables,
+SELECT on categories and sequence usage; it cannot migrate. The reader receives
+only analytical view access. Default view owner privileges allow those views to
+read base tables while denying direct source-table access. Tests connect as the
+actual writer and reader logins to check this, including rejected writes.
+
+## Metabase
+
+Metabase is optional and independent of ingestion. The pinned nixpkgs module was
+inspected directly: it provides `services.metabase.listen.ip`, `listen.port` and
+`openFirewall`, and accepts additional environment variables via the systemd
+service. See [nix/metabase-example.nix](nix/metabase-example.nix). Import it only
+on the intended server. It binds to 127.0.0.1:3000 and leaves the firewall closed.
+Use an SSH tunnel or the existing authenticated private reverse proxy.
+
+Create a separate `metabase_app` PostgreSQL database with a separate login, then
+provide `/run/secrets/metabase-app-env` as a root-readable 0600 environment file:
+
+```
+MB_DB_TYPE=postgres
+MB_DB_HOST=127.0.0.1
+MB_DB_PORT=5432
+MB_DB_DBNAME=metabase_app
+MB_DB_USER=metabase_app
+MB_DB_PASS=replace-locally
+```
+
+The importer never accesses that application database. Metabase's own application
+DB holds dashboard state. In Metabase Admin → Databases add the purchases DB using
+**purchases_reader**, restrict sync to the analytics schema and leave writable
+features disabled. Connect over a private network; enable certificate-verified TLS
+for remote PostgreSQL. Do not use the application's write credentials for analytics.
+
+Create dashboards from
+[src/household_purchases/analytics/dashboards.sql](src/household_purchases/analytics/dashboards.sql):
+spending overview, category trends, highest spend/frequency, price history, offers
+and charges, and data quality. Add date, retailer, category and status filters in
+the question builder as applicable. Weekly charts use the same order question with
+week granularity. Always label dashboards **Ocado delivery-summary expenditure**.
+Order totals belong to the order view; never sum them through a line join. Price
+history is discounted price per reported unit, not a pure inflation measure.
+Use `analytics.import_health` for aggregate scan times, failed/pending counts,
+provisional orders and unclassified products; the reader cannot see individual
+source metadata. The private `status` CLI exposes the same operational counts.
+
+References: [PostgreSQL connection](https://www.metabase.com/docs/latest/databases/connections/postgresql),
+[minimum reader privileges](https://www.metabase.com/docs/latest/databases/users-roles-privileges),
+[Metabase application database](https://www.metabase.com/docs/latest/installation-and-operation/configuring-application-database).
+Manual dashboard creation is the initial workflow; no live Metabase instance or
+server configuration was supplied, so deployment/dashboard creation remains local
+operator work.
+
+## Monitoring, backups and recovery
+
+Inspect `journalctl -u household-purchases-sync` and
+`systemctl list-timers household-purchases-*`. Runs log counts, source IDs, parser
+version and status; `status` reports completed scans, last import, failed/pending
+sources and unclassified products. Failures exit nonzero. `source_messages` stores
+safe error codes; inspect private archived mail locally to investigate formats.
+Never paste raw MIME, tokens or SQL driver exceptions into public logs/issues.
+
+Use the server's existing encrypted backup workflow for:
+
+- A PostgreSQL custom-format dump (`pg_dump -Fc household_purchases`), including
+  schema/migrations, catalogue, source records and analytics.
+- The entire private raw directory (and Metabase application database for dashboards).
+- Role provisioning/grants and separately protected credential recovery material.
+
+Stop both timers and wait for jobs before taking a coordinated DB/archive snapshot;
+resume them after the snapshot. Or use an existing consistent PostgreSQL/filesystem
+backup mechanism. Protect permissions and encryption throughout. Additional archive
+files after an interrupted import are harmless and may be reimported.
+
+Restore into an empty private database owned by purchases_owner with
+`pg_restore --no-owner --no-acl`, restore the raw directory to mode 0700/files 0600,
+reapply grants, configure the recovered raw path, then run `status` and rerun a
+small known import. It should report duplicate with unchanged line count/spend.
+Start timers after verification. Keep previous backups before migrating/repairing;
+prefer restoring a tested backup over blindly downgrading financial data.
+
+`tests/test_recovery.py` exercises dump + archive restoration into a separate test
+database and verifies duplicate import and explicit reprocessing after restore.
+It runs when PostgreSQL CLI tools are on PATH. All database tests require a
+**disposable** `TEST_DATABASE_URL`; the test login needs role/database creation for
+permissions and recovery tests. They must never point at production.
+
+## Remaining acceptance work
+
+Phases 1–5 are implemented for the documented synthetic source contract. A live
+server was not supplied. Before production: privately verify the exact original
+summary labels/date prose, run a small credentialed Fastmail dry-run, review failed
+layouts, backfill, deploy to the target host and create dashboards. The sample's
+private HTML structure beyond `productTable` could not be verified. Phase 6 remains
+future work requiring real receipt/substitution/refund/voucher/bag-return examples.
+
+Verification on aarch64-linux: 51 tests passed with disposable PostgreSQL, including
+actual database roles and dump/archive restoration. `nix flake check -L` and
+`nix develop --command python --version` passed. The built Nix CLI migrated an
+empty DB, imported the synthetic fixture twice (one order/30 lines/9291 pence),
+classified five products, and reported no failed/pending sources. x86_64-linux
+is exposed by the flake but was not built on this host.

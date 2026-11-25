@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from household_purchases.categorisation import LocalClassifier, classify, set_category
 from household_purchases.config import Settings, secret_file
 from household_purchases.db import engine_for
-from household_purchases.email.fastmail import FastmailClient
+from household_purchases.email.fastmail import FastmailClient, JmapError
 from household_purchases.ingestion import Ingestor
 from household_purchases.models import Category, Order, Product, ScanState, SourceMessage
 from household_purchases.parsers.base import ParseError
@@ -31,6 +31,7 @@ def arguments() -> argparse.ArgumentParser:
     reprocess = sub.add_parser("reprocess")
     reprocess.add_argument("--source-id", type=int, required=True)
     sub.add_parser("status")
+    sub.add_parser("migrate", help="Apply migrations explicitly using schema owner credentials")
     for name in ("import-history", "sync"):
         remote = sub.add_parser(name)
         remote.add_argument("--since", type=date.fromisoformat)
@@ -49,6 +50,18 @@ def arguments() -> argparse.ArgumentParser:
 
 
 def execute(args: argparse.Namespace, settings: Settings) -> int:
+    if args.command == "migrate":
+        from alembic import command
+        from alembic.config import Config
+
+        location = Path(__file__).parent / "migrations"
+        if not location.is_dir():
+            location = Path(__file__).resolve().parents[2] / "migrations"
+        config = Config()
+        config.set_main_option("script_location", str(location))
+        command.upgrade(config, "head")
+        print("Migrations applied")
+        return 0
     parser = OcadoParser(settings.timezone)
     if args.command == "import-eml" and args.dry_run:
         order = parser.parse(args.path.read_bytes())
@@ -187,6 +200,6 @@ def main() -> int:
         return execute(args, Settings())
     except Exception as exc:
         # Driver and HTTP exception strings can contain private parameters/URLs.
-        reason = str(exc) if isinstance(exc, ParseError) else type(exc).__name__
+        reason = str(exc) if isinstance(exc, (ParseError, JmapError)) else type(exc).__name__
         print(f"Command failed: {reason}", file=sys.stderr)
         return 1

@@ -86,13 +86,14 @@ dependencies = [
     { name = "alembic" },
     { name = "beautifulsoup4" },
     { name = "httpx" },
-    { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg" },
     { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "psycopg-binary" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -102,13 +103,14 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.14,<2" },
     { name = "beautifulsoup4", specifier = ">=4.12,<5" },
     { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
+    { name = "psycopg", specifier = ">=3.2,<4" },
     { name = "pydantic", specifier = ">=2.10,<3" },
     { name = "sqlalchemy", specifier = ">=2.0.36,<3" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "psycopg-binary", specifier = ">=3.2,<4" },
     { name = "pytest", specifier = ">=8.3,<10" },
     { name = "ruff", specifier = ">=0.9,<1" },
 ]
@@ -313,11 +315,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b4/74/ff710399dfa9fe9b546c2f5a05ea2f9b9d1dc2145c0b59e53a3fa2013679/psycopg-3.3.9.tar.gz", hash = "sha256:87c1d85c3e0e88e811d3c0b3808f947bd967c6faf34af6cd86fd021f77793d6c", size = 171122, upload-time = "2026-11-12T09:04:06.548Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/52/5d/a7957d1b5484f8e5094a15b1a400929324f978b670bd4a95179e1a012ec2/psycopg-3.3.9-py3-none-any.whl", hash = "sha256:d2d7d04a1ce6dab4f5b27316bea3b52585cafa2f2d631e5b09dd69823f5c26f6", size = 219041, upload-time = "2026-11-12T08:58:18.454Z" },
-]
-
-[package.optional-dependencies]
-binary = [
-    { name = "psycopg-binary", marker = "implementation_name != 'pypy'" },
 ]
 
 [[package]]

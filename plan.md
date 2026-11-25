@@ -513,47 +513,47 @@ Use separate roles for migrations/schema ownership, importer writes and Metabase
 
 ### Phase 1 — Offline parser and validated data contracts
 
-- [ ] Inspect repository; set up Python packaging, dev shell, pytest and fixtures.
-- [ ] Build sanitised EML fixture from the supplied HTML structure, preserving expected totals and representative rows.
-- [ ] Implement Pydantic contracts, MIME parser, Ocado parser and monetary reconciliation.
-- [ ] Implement offline `import-eml --dry-run` or equivalent parser CLI.
-- [ ] Test quoted-printable encoding, multipart HTML, entities, whitespace, multiple quantities, missing table, missing order ID, bad rows, unexpected totals and delivery-date timezone handling.
+- [x] Inspect repository; set up Python packaging, dev shell, pytest and fixtures.
+- [x] Build sanitised EML fixture from the supplied HTML structure, preserving expected totals and representative rows.
+- [x] Implement Pydantic contracts, MIME parser, Ocado parser and monetary reconciliation.
+- [x] Implement offline `import-eml --dry-run` or equivalent parser CLI.
+- [x] Test quoted-printable encoding, multipart HTML, entities, whitespace, multiple quantities, missing table, missing order ID, bad rows, unexpected totals and delivery-date timezone handling.
 
 **Acceptance:** sample fixture yields 30 lines, 34 units, £92.31 in product spend, £26.95 savings and £92.91 total. Kallo quantity three produces £4.20 extended cost, not £12.60. Invalid input fails visibly without writes.
 
 ### Phase 2 — Persistence and idempotent ingestion
 
-- [ ] Implement SQLAlchemy models, Alembic migrations, seed categories and PostgreSQL integration tests.
-- [ ] Implement private raw archive, source processing records and transactional product/order/line ingestion.
-- [ ] Implement duplicate handling, conflict detection, retry and explicit reprocess commands.
-- [ ] Add read-only analytics views and test joins/aggregation.
+- [x] Implement SQLAlchemy models, Alembic migrations, seed categories and PostgreSQL integration tests.
+- [x] Implement private raw archive, source processing records and transactional product/order/line ingestion.
+- [x] Implement duplicate handling, conflict detection, retry and explicit reprocess commands.
+- [x] Add read-only analytics views and test joins/aggregation.
 
 **Acceptance:** importing the sample twice creates one order, 30 purchase lines and unchanged spend; importing another order with overlapping products reuses catalogue entries; a malformed order creates no partial purchase data; failed records can be retried; manual categories survive reprocessing.
 
 ### Phase 3 — Fastmail ingestion and historical backfill
 
-- [ ] Verify current Fastmail JMAP authentication and capabilities; implement client and mocked API tests.
-- [ ] Implement paginated historical discovery, MIME download and local sender/subject checks.
-- [ ] Add repeatable `import-history` and `sync` modes with safe deduplication; introduce incremental watermark only if needed.
-- [ ] Exercise authentication failures, transient errors, duplicate results, pagination and interrupted scans.
+- [x] Verify current Fastmail JMAP authentication and capabilities; implement client and mocked API tests.
+- [x] Implement paginated historical discovery, MIME download and local sender/subject checks.
+- [x] Add repeatable `import-history` and `sync` modes with safe deduplication; introduce incremental watermark only if needed.
+- [x] Exercise authentication failures, transient errors, duplicate results, pagination and interrupted scans.
 - [ ] Run a dry-run/small live import with user-supplied credentials, then historical backfill once authorised.
 
 **Acceptance:** all discovered matching messages are either imported, identified as duplicates or recorded as failures; repeated historical imports do not duplicate orders; the mailbox remains unchanged; failures are visible and recoverable.
 
 ### Phase 4 — Categorisation
 
-- [ ] Seed stable hierarchical category slugs and version-controlled rules.
-- [ ] Implement classification precedence, optional validated local LLM client and manual CLI controls.
-- [ ] Test invalid model responses, unavailable endpoint, ambiguous names, manual overrides and existing-product reuse.
+- [x] Seed stable hierarchical category slugs and version-controlled rules.
+- [x] Implement classification precedence, optional validated local LLM client and manual CLI controls.
+- [x] Test invalid model responses, unavailable endpoint, ambiguous names, manual overrides and existing-product reuse.
 
 **Acceptance:** classification is reusable across purchases; unknown products are visible as uncategorised; manually reclassifying one product updates historical category analytics; ingestion succeeds with the LLM disabled or unavailable.
 
 ### Phase 5 — NixOS deployment and Metabase
 
-- [ ] Package the CLI and provide NixOS service/timer module, credential handling and migration documentation.
+- [x] Package the CLI and provide NixOS service/timer module, credential handling and migration documentation.
 - [ ] Configure PostgreSQL roles and deploy private Metabase instance using verified pinned nixpkgs options.
-- [ ] Build or document dashboard queries and setup; verify read-only permissions and reconciliation.
-- [ ] Document monitoring, backup and recovery; perform an end-to-end smoke test.
+- [x] Build or document dashboard queries and setup; verify read-only permissions and reconciliation.
+- [x] Document monitoring, backup and recovery; perform an end-to-end smoke test.
 
 **Acceptance:** scheduled ingestion runs unattended with no public endpoints or plaintext secrets in the repository; dashboard totals match database facts; the Metabase role cannot modify purchase tables; a repeated timer run produces no duplicates.
 
@@ -569,20 +569,29 @@ Use separate roles for migrations/schema ownership, importer writes and Metabase
 
 ## 14. MVP completion checklist
 
-- [ ] All parser, database, API-mock and classification tests pass.
-- [ ] Nix build/dev environment works against the repository's pinned dependencies.
-- [ ] Migrations can create the database from scratch.
-- [ ] Offline dry-run is documented and functional.
-- [ ] Historical import is idempotent and reports parse failures.
+- [x] All parser, database, API-mock and classification tests pass.
+- [x] Nix build/dev environment works against the repository's pinned dependencies.
+- [x] Migrations can create the database from scratch.
+- [x] Offline dry-run is documented and functional.
+- [x] Historical import is idempotent and reports parse failures.
 - [ ] Monetary totals reconcile against real supported fixtures.
-- [ ] Product categories can be corrected without modifying purchase facts.
-- [ ] NixOS module, timer, secret-file setup and backup procedure are documented.
-- [ ] Metabase analytical role and views are validated.
-- [ ] README explains provisional versus final order limitations and missing product identity/pack-size limitations.
-- [ ] No private email exports, live credentials or personal data are committed.
+- [x] Product categories can be corrected without modifying purchase facts.
+- [x] NixOS module, timer, secret-file setup and backup procedure are documented.
+- [x] Metabase analytical role and views are validated.
+- [x] README explains provisional versus final order limitations and missing product identity/pack-size limitations.
+- [x] No private email exports, live credentials or personal data are committed.
 
 ## 15. Scope and effort
 
 The initial estimate is roughly 6–12 hours for an experienced developer to build a basic working importer, classification and dashboard setup, assuming straightforward Fastmail access and an existing PostgreSQL environment. Robustness, deployment integration, historical template variants, final receipts and operational testing may take longer. This is an estimate, not a deadline or a requirement to cut validation short.
 
 Prioritise phases 1–3: a correct, portable purchase dataset is the most valuable initial deliverable. Categorisation and dashboards can be added incrementally without re-importing every order. Do not expand into inventory tracking, nutritional estimates, bank transaction matching, scraping Ocado product pages, or multi-user application design unless specifically requested.
+
+## Implementation verification
+
+- 51 tests passed using a disposable PostgreSQL instance, including actual writer/reader logins, scan interruption, rollback and dump/archive restoration.
+- `nix flake check -L` and development shell startup passed on aarch64-linux. PostgreSQL integration tests run separately from the Nix build's offline tests.
+- The built Nix CLI applied four migrations to an empty database, imported the synthetic fixture twice without duplicate spend, classified products and reported status.
+- Real MIME was not supplied: the fixture preserves documented structure/counts/totals with explicitly synthetic filler rows. Real summary labels/date wording and real-email reconciliation remain unverified.
+- SQL role provisioning, private Metabase host configuration and dashboard queries are provided. Live Fastmail import, target-host deployment and actual dashboards remain pending credentials/server configuration.
+- Phase 6 remains future work; no receipt/refund/voucher semantics were invented.
