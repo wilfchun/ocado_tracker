@@ -3,6 +3,11 @@
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC;
 REVOKE ALL ON SCHEMA analytics FROM PUBLIC;
+-- Reapplying the policy also removes stale direct grants on managed objects.
+REVOKE CREATE ON SCHEMA public FROM purchases_importer, purchases_reader;
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM purchases_reader;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM purchases_reader;
+REVOKE ALL ON ALL TABLES IN SCHEMA analytics FROM purchases_reader;
 GRANT USAGE ON SCHEMA public TO purchases_importer;
 GRANT SELECT ON categories TO purchases_importer;
 GRANT SELECT, INSERT, UPDATE, DELETE ON products, orders, purchase_items, source_messages, scan_state TO purchases_importer;

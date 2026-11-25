@@ -51,15 +51,9 @@ def arguments() -> argparse.ArgumentParser:
 
 def execute(args: argparse.Namespace, settings: Settings) -> int:
     if args.command == "migrate":
-        from alembic import command
-        from alembic.config import Config
+        from household_purchases.migration import migrate
 
-        location = Path(__file__).parent / "migrations"
-        if not location.is_dir():
-            location = Path(__file__).resolve().parents[2] / "migrations"
-        config = Config()
-        config.set_main_option("script_location", str(location))
-        command.upgrade(config, "head")
+        migrate(settings.database_url())
         print("Migrations applied")
         return 0
     parser = OcadoParser(settings.timezone)
