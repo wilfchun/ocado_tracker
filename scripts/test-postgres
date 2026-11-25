@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Only a disposable local database. tests/conftest.py drops its public schema.
+export TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgresql+psycopg://127.0.0.1:55432/purchases_test}"
+exec .venv/bin/pytest "$@"

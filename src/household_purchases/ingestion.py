@@ -53,6 +53,7 @@ class Ingestor:
         remote_id: str | None = None,
         received_at: datetime | None = None,
         reprocess: bool = False,
+        rejection: str | None = None,
     ) -> tuple[int, str]:
         path = archive(raw, self.raw_dir)
         digest = path.removesuffix(".eml")
@@ -85,6 +86,8 @@ class Ingestor:
             if source.status in ("imported", "duplicate", "superseded") and not reprocess:
                 return source_id, "duplicate"
         try:
+            if rejection:
+                raise ParseError(rejection)
             parsed = self.parser.parse(raw, received_at=received_at)
             fingerprint = hashlib.sha256(parsed.model_dump_json().encode()).hexdigest()
             with Session(self.engine) as session, session.begin():
@@ -184,4 +187,7 @@ class Ingestor:
                 remote_id=source.remote_email_id,
                 received_at=source.received_at,
                 reprocess=reprocess,
+                rejection="source_filter_mismatch"
+                if source.error_code == "source_filter_mismatch"
+                else None,
             )

@@ -70,3 +70,41 @@ TEST_DATABASE_URL=postgresql+psycopg:///purchases_test uv run pytest
 
 This deliberately drops the public/analytics schemas in that test database. Without
 that variable, PostgreSQL tests skip; parser and API tests need no server.
+
+## Fastmail history and scheduled scans
+
+Create a **read-only JMAP token** in Fastmail Settings → Privacy & Security → API
+tokens. Keep it in a private file referenced by `FASTMAIL_TOKEN_FILE`. This is a
+broad mailbox credential. No mutation API methods exist in this client. Session
+and download destinations must be HTTPS on the three explicit Fastmail hosts;
+redirects are rejected before credentials can be forwarded elsewhere.
+
+```
+uv run household-purchases import-history --since 2025-01-01 --dry-run
+uv run household-purchases import-history --since 2025-01-01
+uv run household-purchases sync
+```
+
+`--since` is inclusive, `--until` exclusive, at midnight in `TIMEZONE` (default
+Europe/London). Both commands deliberately do a full filtered scan, including
+archived mail, with pagination and local exact header checks. No incremental
+cursor is needed initially; `SYNC_OVERLAP_DAYS` is reserved and unused. A changing
+query state interrupts the scan for safe rerun. Completed scans are recorded only
+after downloads and durable source recording. Parse failures remain retryable;
+download failures remain discoverable on the next scan. Runs containing failures
+exit 1 while independently valid orders still import. HTTP retries are bounded
+at four attempts with backoff (numeric Retry-After capped at 30 seconds).
+
+Optional settings: `SOURCE_ACCOUNT` (non-secret identifier, default `fastmail`),
+`FASTMAIL_ACCOUNT_ID` (JMAP override), `OCADO_SENDER`, `OCADO_SUBJECT`,
+`OCADO_RECIPIENT`, `OCADO_MAILBOX_ID`. Unset recipient/mailbox filters include all
+matching mail. `LOG_LEVEL` defaults to INFO. Secrets are read only by commands
+that need them; offline dry-run needs no environment configuration.
+
+Integration references checked during implementation:
+[Fastmail API](https://www.fastmail.com/dev/),
+[read-only token scopes](https://www.fastmail.help/hc/en-us/articles/5254602856719-API-tokens),
+[JMAP session and downloads (RFC 8620)](https://www.rfc-editor.org/rfc/rfc8620.html),
+[Email/query and Email/get (RFC 8621)](https://www.rfc-editor.org/rfc/rfc8621.html).
+Live import/backfill has not run: supply private credentials and review a small
+real sample before using historical import.
