@@ -24,7 +24,7 @@ def arguments() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="household-purchases")
     sub = parser.add_subparsers(dest="command", required=True)
     eml = sub.add_parser("import-eml")
-    eml.add_argument("path", type=Path)
+    eml.add_argument("path", type=Path, help="EML path, or '-' to read binary stdin")
     eml.add_argument("--dry-run", action="store_true")
     eml.add_argument("--show-json", action="store_true", help="Print private purchase data locally")
     sub.add_parser("retry-failed")
@@ -49,6 +49,14 @@ def arguments() -> argparse.ArgumentParser:
     return parser
 
 
+def read_eml(path: Path) -> bytes:
+    # Reopening /dev/stdin follows /proc/self/fd/0 and repeats permission checks.
+    # Read the inherited descriptor after runuser has switched accounts instead.
+    if path in (Path("-"), Path("/dev/stdin")):
+        return sys.stdin.buffer.read()
+    return path.read_bytes()
+
+
 def execute(args: argparse.Namespace, settings: Settings) -> int:
     if args.command == "migrate":
         from household_purchases.migration import migrate
@@ -58,7 +66,7 @@ def execute(args: argparse.Namespace, settings: Settings) -> int:
         return 0
     parser = OcadoParser(settings.timezone)
     if args.command == "import-eml" and args.dry_run:
-        order = parser.parse(args.path.read_bytes())
+        order = parser.parse(read_eml(args.path))
         print(
             order.model_dump_json(indent=2)
             if args.show_json
@@ -103,7 +111,7 @@ def execute(args: argparse.Namespace, settings: Settings) -> int:
     importer = Ingestor(engine, settings.raw_email_dir, parser)
     try:
         if args.command == "import-eml":
-            source_id, status = importer.ingest(args.path.read_bytes())
+            source_id, status = importer.ingest(read_eml(args.path))
             print(f"source_id={source_id} status={status} parser={parser.version}")
             return int(status == "failed")
         if args.command == "reprocess":

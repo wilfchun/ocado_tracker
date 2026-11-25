@@ -216,13 +216,14 @@ private reverse proxy. No public firewall ports are opened.
 Import an email and view its data immediately:
 
 ```bash
-sudo household-purchases-local import-eml /dev/stdin < "/private/order.eml"
+sudo household-purchases-local import-eml - < "/private/order.eml"
 sudo household-purchases-local classify
 sudo household-purchases-local status
 ```
 
 Input redirection opens your private email as your user before the helper switches
-to the restricted importer account. The same helper supports retries, reprocessing
+to the restricted importer account. `-` reads the already-open binary input stream;
+`/dev/stdin` is also accepted as an alias without reopening its filesystem path. The same helper supports retries, reprocessing
 and category commands. Refresh Metabase's dashboard to see updated facts. It does
 not automatically import the repository's fixtures or original email. If a
 Fastmail token is configured, `sudo systemctl start household-purchases-sync`

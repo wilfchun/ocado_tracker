@@ -18,7 +18,7 @@ let
     runtimeInputs = [ pkgs.util-linux pkgs.coreutils ];
     text = ''
       if [ "$(id -u)" != 0 ]; then
-        echo 'Run with sudo. For private email files: sudo household-purchases-local import-eml /dev/stdin < file.eml' >&2
+        echo 'Run with sudo. For private email files: sudo household-purchases-local import-eml - < file.eml' >&2
         exit 1
       fi
       case "''${1:-}" in
