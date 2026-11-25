@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import os
 import tempfile
 from datetime import UTC, datetime
@@ -15,6 +16,8 @@ from household_purchases.models import Order, Product, PurchaseItem, SourceMessa
 from household_purchases.parsers.base import ParseError
 from household_purchases.parsers.ocado import OcadoParser
 from household_purchases.schemas import normalise_name
+
+log = logging.getLogger(__name__)
 
 
 def archive(raw: bytes, directory: Path) -> str:
@@ -93,6 +96,14 @@ class Ingestor:
             with Session(self.engine) as session, session.begin():
                 lock(session)
                 source = session.get(SourceMessage, source_id)
+                authoritative = session.scalar(
+                    select(Order).where(Order.source_message_id == source_id)
+                )
+                if authoritative and (authoritative.retailer, authoritative.order_reference) != (
+                    parsed.retailer,
+                    parsed.order_reference,
+                ):
+                    raise ParseError("source_identity_changed")
                 order = session.scalar(
                     select(Order).where(
                         Order.retailer == parsed.retailer,
@@ -164,6 +175,12 @@ class Ingestor:
                 source.processed_at = datetime.now(UTC)
                 source.parser_version = self.parser.version
                 source.error_code = source.error_detail = code
+            log.warning(
+                "source_id=%d status=failed parser=%s error=%s",
+                source_id,
+                self.parser.version,
+                code,
+            )
             return source_id, "failed"
 
     def _mark(self, source: SourceMessage, status: str) -> None:

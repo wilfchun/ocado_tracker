@@ -65,3 +65,17 @@ def test_quoted_printable_and_multipart():
 def test_bad_money(value):
     with pytest.raises(ParseError):
         money(value)
+
+
+def test_unsupported_structure():
+    with pytest.raises(ParseError, match="unsupported_adjustment_structure"):
+        OcadoParser().parse(RAW.replace(b"</body>", b"<h2>Substitutions</h2></body>"))
+
+
+def test_whitespace_and_explicit_date():
+    raw = RAW.replace(b"M&amp;S Fusilli", b" M&amp;S \n  Fusilli ").replace(
+        b"Your delivery is today", b"Your delivery date: 2026-11-19"
+    )
+    order = OcadoParser().parse(raw)
+    assert order.delivery_date == date(2026, 11, 19)
+    assert order.items[2].name == "M&S Fusilli"

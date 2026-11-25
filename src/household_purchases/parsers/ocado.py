@@ -100,6 +100,15 @@ class OcadoParser:
             delivery_date = timestamp.astimezone(self.timezone).date()
         else:
             raise ParseError("unknown_delivery_date")
+        # Explicitly reject unsupported source structures even if totals happen to balance.
+        remaining = BeautifulSoup(str(soup), "html.parser")
+        remaining.select_one("#productTable").decompose()
+        if re.search(
+            r"\b(?:substitutions?|unavailable products?|refunds?|vouchers?|bag returns?)\b",
+            remaining.get_text(" ", strip=True),
+            re.I,
+        ):
+            raise ParseError("unsupported_adjustment_structure")
         summary = {}
         for row in soup.find_all("tr"):
             if row in rows:

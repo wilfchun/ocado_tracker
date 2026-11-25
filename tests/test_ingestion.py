@@ -85,3 +85,26 @@ def test_archive_private_and_dry_run(tmp_path):
     name = archive(RAW, directory)
     assert directory.stat().st_mode & 0o777 == 0o700
     assert (directory / name).stat().st_mode & 0o777 == 0o600
+
+
+def test_reprocess_cannot_change_order_identity(db, tmp_path):
+    from household_purchases.parsers.ocado import OcadoParser
+
+    class ChangedParser(OcadoParser):
+        def parse(self, raw, *, received_at=None):
+            return (
+                super()
+                .parse(raw, received_at=received_at)
+                .model_copy(update={"order_reference": "CHANGED"})
+            )
+
+    importer = Ingestor(db, tmp_path / "archive")
+    source, _ = importer.ingest(RAW)
+    assert (
+        Ingestor(db, tmp_path / "archive", ChangedParser()).retry(source, reprocess=True)[1]
+        == "failed"
+    )
+    with Session(db) as s:
+        assert s.scalar(select(func.count()).select_from(Order)) == 1
+        assert s.get(SourceMessage, source).status == "imported"
+        assert s.get(SourceMessage, source).error_code == "source_identity_changed"
