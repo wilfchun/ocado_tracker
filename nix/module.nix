@@ -2,7 +2,7 @@
 let
   cfg = config.services.household-purchases;
   inherit (lib) mkOption mkEnableOption types mkIf optionalAttrs;
-  credentials = [ "database-url:${cfg.databaseUrlFile}" ];
+  credentials = lib.optional (cfg.databaseUrlFile != null) "database-url:${cfg.databaseUrlFile}";
   baseEnvironment = {
     RAW_EMAIL_DIR = "${cfg.dataDir}/raw";
     TIMEZONE = cfg.timezone;
@@ -15,10 +15,13 @@ let
     // optionalAttrs (cfg.accountId != null) { FASTMAIL_ACCOUNT_ID = cfg.accountId; };
   service = name: {
     wants = [ "network-online.target" ];
-    after = [ "network-online.target" "postgresql.service" ];
-    environment = baseEnvironment // {
+    after = [ "network-online.target" "postgresql.service" ] ++ lib.optional cfg.localStack.enable "household-purchases-provision.service";
+    requires = lib.optional cfg.localStack.enable "household-purchases-provision.service";
+    environment = baseEnvironment // (if cfg.localStack.enable then {
+      DATABASE_URL = cfg.localStack.importerUrl;
+    } else {
       DATABASE_URL_FILE = "/run/credentials/${name}.service/database-url";
-    };
+    });
     serviceConfig = {
       Type = "oneshot";
       User = "household-purchases";
@@ -43,12 +46,13 @@ let
     };
   };
 in {
+  imports = [ ./local-stack.nix ];
   options.services.household-purchases = {
     enable = mkEnableOption "private household purchase importer";
     package = mkOption { type = types.package; description = "Importer package (provided by the flake module)."; };
     dataDir = mkOption { type = types.str; default = "/var/lib/household-purchases"; };
-    databaseUrlFile = mkOption { type = types.str; description = "Runtime path to database URL secret; never a Nix store path."; };
-    fastmailTokenFile = mkOption { type = types.str; description = "Runtime path to read-only JMAP token."; };
+    databaseUrlFile = mkOption { type = types.nullOr types.str; default = null; description = "Runtime path to database URL secret; never a Nix store path."; };
+    fastmailTokenFile = mkOption { type = types.nullOr types.str; default = null; description = "Runtime path to read-only JMAP token."; };
     syncSchedule = mkOption { type = types.str; default = "hourly"; };
     classificationSchedule = mkOption { type = types.nullOr types.str; default = "daily"; };
     timezone = mkOption { type = types.str; default = "Europe/London"; };
@@ -67,24 +71,26 @@ in {
   };
   config = mkIf cfg.enable {
     assertions = [
+      { assertion = cfg.localStack.enable || cfg.databaseUrlFile != null; message = "Set databaseUrlFile or enable household-purchases.localStack"; }
+      { assertion = !cfg.localStack.enable || cfg.databaseUrlFile == null; message = "localStack manages its local database; omit databaseUrlFile"; }
       { assertion = !cfg.llm.enable || cfg.llm.model != ""; message = "household-purchases.llm.model is required when enabled"; }
       { assertion = lib.hasPrefix "/" cfg.dataDir; message = "household-purchases.dataDir must be absolute"; }
       { assertion = lib.all (p: lib.hasPrefix "/" p && !(lib.hasPrefix "/nix/store/" p))
-          ([ cfg.databaseUrlFile cfg.fastmailTokenFile ] ++ lib.optional (cfg.llm.apiKeyFile != null) cfg.llm.apiKeyFile);
+          (lib.filter (p: p != null) [ cfg.databaseUrlFile cfg.fastmailTokenFile ] ++ lib.optional (cfg.llm.apiKeyFile != null) cfg.llm.apiKeyFile);
         message = "household-purchases credentials must be runtime absolute paths outside the Nix store"; }
     ];
     users.groups.household-purchases = {};
     users.users.household-purchases = { isSystemUser = true; group = "household-purchases"; home = cfg.dataDir; };
     systemd.tmpfiles.rules = [ "d ${cfg.dataDir} 0700 household-purchases household-purchases -" ];
-    systemd.services.household-purchases-sync = lib.recursiveUpdate (service "household-purchases-sync") {
+    systemd.services.household-purchases-sync = mkIf (cfg.fastmailTokenFile != null) (lib.recursiveUpdate (service "household-purchases-sync") {
       description = "Import household delivery summaries (read-only mailbox)";
       environment.FASTMAIL_TOKEN_FILE = "/run/credentials/household-purchases-sync.service/fastmail-token";
       serviceConfig = {
         LoadCredential = credentials ++ [ "fastmail-token:${cfg.fastmailTokenFile}" ];
         ExecStart = "${lib.getExe cfg.package} sync";
       };
-    };
-    systemd.timers.household-purchases-sync = {
+    });
+    systemd.timers.household-purchases-sync = mkIf (cfg.fastmailTokenFile != null) {
       wantedBy = [ "timers.target" ];
       timerConfig = { OnCalendar = cfg.syncSchedule; Persistent = true; RandomizedDelaySec = "5min"; };
     };

@@ -595,3 +595,19 @@ Prioritise phases 1–3: a correct, portable purchase dataset is the most valuab
 - The subsequently supplied real MIME is retained privately under ignored tests/private. A sanitised derivative preserves the real layout and reconciles 30 lines, 34 units, 9231 pence product spend and 9291 pence total. Parser v2 supports its one-cell summary, negative savings, reference/date wording and informational policy copy. The original synthetic fixture remains covered.
 - SQL role provisioning, private Metabase host configuration and dashboard queries are provided. Live Fastmail import, target-host deployment and actual dashboards remain pending credentials/server configuration.
 - Phase 6 remains future work; no receipt/refund/voucher semantics were invented.
+
+### Deployment automation follow-up
+
+The requested opt-in `services.household-purchases.localStack.enable` now automates
+local PostgreSQL roles/databases, forward migrations/grants, persistent runtime
+credentials, Metabase application storage, initial admin setup, read-only source
+registration and a six-question starter dashboard. Fastmail credentials are
+optional for local-file-only use. Existing/external database mode retains manual
+migration control. Back up before a NixOS switch that advances migrations; NixOS
+rollback does not reverse database changes.
+
+Verification: 76 regular tests plus one live Metabase 0.56.10 test passed, including
+repeat provisioning, stale reader-grant removal, SCRAM authentication and all six
+queries (92.91 GBP in the monthly chart). The Nix package and both module modes
+build/check successfully on aarch64-linux. A target NixOS host has not been
+changed; no full VM boot was run because this development host has no KVM.

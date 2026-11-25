@@ -148,7 +148,115 @@ checks the NixOS module. The flake supports aarch64-linux and x86_64-linux and
 pins nixpkgs `1412caf7bf9e660f2f962917c14b1ea1c3bc695e`. Python's uv lock and
 nixpkgs each pin their own dependency closure; tests run in both environments.
 
-Add this flake as `inputs.household-purchases` in the server flake, then:
+### Automatic local stack (recommended)
+
+Enable the integrated NixOS module to provision the complete local service. A
+package supplies executables; the NixOS module supplies persistent databases,
+users, credentials, migrations, service ordering, timers and Metabase.
+
+In your existing server flake, add this checkout as an input:
+
+```nix
+inputs.household-purchases.url = "git+file:///absolute/path/to/ocado_tracker";
+```
+
+Use a Git URL so only version-controlled source enters the Nix store. Do not use
+an unrestricted `path:` input containing private emails or runtime credentials.
+Once published, a pinned GitHub input works too. Add `household-purchases` to the
+host flake's outputs arguments, then append these entries to the host's existing
+`nixosSystem.modules` list:
+
+```nix
+household-purchases.nixosModules.default
+{
+  services.household-purchases = {
+    enable = true;
+    localStack.enable = true;
+    # Optional: add later to enable hourly Fastmail sync.
+    # fastmailTokenFile = "/run/secrets/fastmail-jmap";
+  };
+}
+```
+
+See [nix/local-stack-example.nix](nix/local-stack-example.nix). Keep the host's
+existing hardware, networking and `system.stateVersion` configuration. Run your
+normal `sudo nixos-rebuild switch --flake /path/to/server-config#hostname`.
+No database URL file or manual SQL commands are needed in this mode.
+
+The module enables the host's PostgreSQL service, creates dedicated
+`household_purchases` and `household_purchases_metabase` databases, creates
+restricted owner/importer/reader/application roles, applies migrations and grants,
+and starts Metabase at **http://127.0.0.1:3000**. PostgreSQL's existing major
+version is retained. The importer uses Unix-socket peer authentication. Metabase
+uses persistent generated passwords and its own application database; it only
+reads purchase analytics through the reader role. The flake pins the Metabase
+package, including the API version used by automatic setup.
+
+Metabase setup creates the initial **admin@example.invalid** login, a read-only
+purchases connection restricted to the analytics schema, and a dashboard with six
+questions: monthly expenditure, categories, top products, offers/charges, price
+history and import health. Retrieve the generated login password on the server:
+
+```bash
+sudo cat /var/lib/household-purchases-provision/metabase-admin-password
+```
+
+Set `localStack.metabase.adminEmail` before the first deployment to choose another
+login name. Keep that account's credentials consistent for future automatic
+setup; create a separate everyday account in Metabase if desired. To manage setup
+manually instead, set `localStack.metabase.bootstrap = false` and use the wizard.
+Set `localStack.metabase.enable = false` for a managed database/importer without
+Metabase. This mode manages a dedicated instance, rather than adopting a shared
+Metabase installation. Database-name options are available under `localStack`.
+
+On another computer, connect with `ssh -N -L 3000:127.0.0.1:3000 your-server`, then
+open **http://localhost:3000**. Alternatively use your existing authenticated
+private reverse proxy. No public firewall ports are opened.
+
+Import an email and view its data immediately:
+
+```bash
+sudo household-purchases-local import-eml /dev/stdin < "/private/order.eml"
+sudo household-purchases-local classify
+sudo household-purchases-local status
+```
+
+Input redirection opens your private email as your user before the helper switches
+to the restricted importer account. The same helper supports retries, reprocessing
+and category commands. Refresh Metabase's dashboard to see updated facts. It does
+not automatically import the repository's fixtures or original email. If a
+Fastmail token is configured, `sudo systemctl start household-purchases-sync`
+runs a full backfill; subsequent timer runs deduplicate purchases.
+
+Provisioning is repeatable: databases are preserved, migrations only advance,
+passwords remain stable, and bootstrap discovers existing objects. Existing
+question definitions and dashboard layouts are preserved, and missing managed
+questions are recreated. Keep personal dashboards outside the managed collection
+if you want to delete or rename its supplied content. A database owned by another
+role is rejected rather than taken over. Managed roles with elevated privileges
+or inherited role memberships are also rejected.
+
+On upgrades, **back up before switching**: this opt-in mode automatically runs
+forward migrations before starting dependent services. NixOS rollback changes
+software/configuration; it does not undo database migrations. Back up both
+databases, `${dataDir}/raw` (default `/var/lib/household-purchases/raw`) and
+`/var/lib/household-purchases-provision` together. The last directory contains the
+runtime database/admin credentials needed to recover the managed stack. Never
+copy it into a flake or the Nix store. Restoring an old application DB without its
+matching credentials requires explicit credential recovery.
+
+Check `systemctl status household-purchases-provision`,
+`household-purchases-metabase-setup` and `metabase` for readiness. A provisioning
+failure prevents dependent services starting; an API setup failure leaves Metabase
+available for investigation. The state directory is persistent, private (0700),
+and owned by the PostgreSQL service account; secret files are 0600. There is no
+separate PostgreSQL cluster/container. Automatic migrations serialize with importer
+writes through the shared database lock.
+
+### Existing/external database (manual provisioning)
+
+Leave `localStack.enable = false` (the default) to use independently managed
+PostgreSQL and Metabase. Add this flake as `inputs.household-purchases`, then:
 
 ```nix
 { inputs, ... }: {
@@ -186,7 +294,7 @@ PostgreSQL publicly. Configure the importer URL with `postgresql+psycopg` driver
 private host/socket, database and **purchases_importer** role. Use a different
 0600 URL file for the **purchases_owner** role for migrations.
 
-For each upgrade, stop both timers and wait for active jobs, back up, then run
+In external-database mode, for each upgrade, stop both timers and wait for active jobs, back up, then run
 `DATABASE_URL_FILE=/private/owner-url household-purchases migrate` explicitly as
 an operator able to read that credential. Reapply grants as owner/admin:
 
@@ -201,8 +309,9 @@ only analytical view access. Default view owner privileges allow those views to
 read base tables while denying direct source-table access. Tests connect as the
 actual writer and reader logins to check this, including rejected writes.
 
-## Metabase
+## Independently managed Metabase
 
+The automatic local stack above handles these steps for you. For manual setup,
 Metabase is optional and independent of ingestion. The pinned nixpkgs module was
 inspected directly: it provides `services.metabase.listen.ip`, `listen.port` and
 `openFirewall`, and accepts additional environment variables via the systemd
@@ -243,9 +352,9 @@ source metadata. The private `status` CLI exposes the same operational counts.
 References: [PostgreSQL connection](https://www.metabase.com/docs/latest/databases/connections/postgresql),
 [minimum reader privileges](https://www.metabase.com/docs/latest/databases/users-roles-privileges),
 [Metabase application database](https://www.metabase.com/docs/latest/installation-and-operation/configuring-application-database).
-Manual dashboard creation is the initial workflow; no live Metabase instance or
-server configuration was supplied, so deployment/dashboard creation remains local
-operator work.
+Manual dashboard creation is available in external-database mode; the local stack
+creates its own starter dashboard automatically. No target host has been changed
+from this checkout.
 
 ## Monitoring, backups and recovery
 
@@ -260,7 +369,9 @@ Use the server's existing encrypted backup workflow for:
 
 - A PostgreSQL custom-format dump (`pg_dump -Fc household_purchases`), including
   schema/migrations, catalogue, source records and analytics.
-- The entire private raw directory (and Metabase application database for dashboards).
+- The entire private raw directory and Metabase application database for dashboards.
+- `/var/lib/household-purchases-provision` when using the automatic local stack,
+  containing its generated persistent credentials.
 - Role provisioning/grants and separately protected credential recovery material.
 
 Stop both timers and wait for jobs before taking a coordinated DB/archive snapshot;
@@ -300,3 +411,23 @@ After adding the real-email fixture: 49 offline tests pass, including the real
 format and seven invalid/unsupported variants. Ten PostgreSQL integration tests
 are skipped without a running test database. The original private email was also
 parsed locally and reconciles to the same 30 lines, 34 units and 9291 pence.
+
+Local-stack verification: the provisioning and bootstrap helpers are tested against
+disposable PostgreSQL and the pinned Metabase 0.56.10 service, including initial
+setup, repeated provisioning, read-only data access and starter dashboard queries.
+NixOS service configuration is evaluated/built; a full NixOS VM boot is not run on
+this development host (no KVM). No production machine has been deployed.
+
+Integration references: [Metabase setup API](https://www.metabase.com/learn/metabase-basics/administration/administration-and-operation/metabase-api),
+[Metabase API reference](https://www.metabase.com/docs/latest/api),
+[PostgreSQL peer authentication](https://www.postgresql.org/docs/current/auth-peer.html).
+The actual bootstrap API was exercised against the pinned package, since the
+latest Metabase API can differ from that release.
+
+For this local-stack change, 76 regular tests passed plus the opt-in live Metabase
+smoke test (77 total). All six starter questions executed successfully through the
+actual Metabase API, the monthly question returned 92.91 GBP for the supplied
+fixture, and repeated setup preserved one connection/dashboard. Fresh reader
+connections exercised SCRAM, including rejection of an incorrect password.
+`nix flake check -L` passed for the package, external-database module and integrated
+local-stack module/helper on aarch64-linux.
