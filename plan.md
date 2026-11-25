@@ -574,7 +574,7 @@ Use separate roles for migrations/schema ownership, importer writes and Metabase
 - [x] Migrations can create the database from scratch.
 - [x] Offline dry-run is documented and functional.
 - [x] Historical import is idempotent and reports parse failures.
-- [ ] Monetary totals reconcile against real supported fixtures.
+- [x] Monetary totals reconcile against real supported fixtures.
 - [x] Product categories can be corrected without modifying purchase facts.
 - [x] NixOS module, timer, secret-file setup and backup procedure are documented.
 - [x] Metabase analytical role and views are validated.
@@ -592,6 +592,6 @@ Prioritise phases 1–3: a correct, portable purchase dataset is the most valuab
 - 51 tests passed using a disposable PostgreSQL instance, including actual writer/reader logins, scan interruption, rollback and dump/archive restoration.
 - `nix flake check -L` and development shell startup passed on aarch64-linux. PostgreSQL integration tests run separately from the Nix build's offline tests.
 - The built Nix CLI applied four migrations to an empty database, imported the synthetic fixture twice without duplicate spend, classified products and reported status.
-- Real MIME was not supplied: the fixture preserves documented structure/counts/totals with explicitly synthetic filler rows. Real summary labels/date wording and real-email reconciliation remain unverified.
+- The subsequently supplied real MIME is retained privately under ignored tests/private. A sanitised derivative preserves the real layout and reconciles 30 lines, 34 units, 9231 pence product spend and 9291 pence total. Parser v2 supports its one-cell summary, negative savings, reference/date wording and informational policy copy. The original synthetic fixture remains covered.
 - SQL role provisioning, private Metabase host configuration and dashboard queries are provided. Live Fastmail import, target-host deployment and actual dashboards remain pending credentials/server configuration.
 - Phase 6 remains future work; no receipt/refund/voucher semantics were invented.

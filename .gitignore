@@ -7,3 +7,5 @@ __pycache__/
 .env.*
 raw-emails/
 result
+# Original private receipts; only sanitised derivatives belong in fixtures.
+/tests/private/

@@ -28,6 +28,18 @@ LABELS = {
     "order total": "total_pence",
 }
 
+# The observed retailer template puts the entire summary in one td, separated
+# by br elements. Full matching makes extra or changed adjustments reviewable.
+AMOUNT = r"(?:\d+|\d{1,3}(?:,\d{3})+)\.\d{2}"
+INLINE_SUMMARY = re.compile(
+    rf"Sub total: £(?P<gross_subtotal_pence>{AMOUNT})\s+"
+    rf"Offers savings: -£(?P<offer_savings_pence>{AMOUNT})\s+"
+    rf"Delivery charge: £(?P<delivery_charge_pence>{AMOUNT})\s+"
+    rf"Carrier bag charge \(£0\.10/\s*each\): £(?P<bag_charge_pence>{AMOUNT})\s+"
+    rf"Small order charge: £(?P<small_order_charge_pence>{AMOUNT})\s+"
+    rf"Total: £(?P<total_pence>{AMOUNT})"
+)
+
 
 def money(text: str) -> int:
     text = text.strip().removeprefix("£").strip()
@@ -37,7 +49,7 @@ def money(text: str) -> int:
 
 
 class OcadoParser:
-    version = "ocado-upcoming-v1"
+    version = "ocado-upcoming-v2"
 
     def __init__(self, timezone: str = "Europe/London"):
         self.timezone = ZoneInfo(timezone)
@@ -79,7 +91,9 @@ class OcadoParser:
             )
         prose = soup.get_text(" ", strip=True)
         refs = re.findall(
-            r"\border (?:reference|number)\s*[:#]?\s*([A-Za-z0-9-]+)", prose, re.IGNORECASE
+            r"\b(?:order (?:reference|number)\s*[:#]?|receipt for order)\s*([A-Za-z0-9-]+)",
+            prose,
+            re.IGNORECASE,
         )
         if len(set(refs)) != 1:
             raise ParseError("missing_or_ambiguous_order_reference")
@@ -93,7 +107,7 @@ class OcadoParser:
             if len(set(explicit)) != 1:
                 raise ParseError("ambiguous_delivery_date")
             delivery_date = date.fromisoformat(explicit[0])
-        elif re.search(r"\bdelivery\s+(?:is\s+)?today\b", prose, re.IGNORECASE):
+        elif re.search(r"\b(?:delivery\s+(?:is\s+)?|order\s+)today\b", prose, re.IGNORECASE):
             timestamp = received_at or parsedate_to_datetime(str(message.get("Date", "")))
             if timestamp.tzinfo is None:
                 raise ParseError("naive_message_timestamp")
@@ -103,11 +117,19 @@ class OcadoParser:
         # Explicitly reject unsupported source structures even if totals happen to balance.
         remaining = BeautifulSoup(str(soup), "html.parser")
         remaining.select_one("#productTable").decompose()
-        if re.search(
-            r"\b(?:substitutions?|unavailable products?|refunds?|vouchers?|bag returns?)\b",
-            remaining.get_text(" ", strip=True),
-            re.I,
-        ):
+        unsupported_label = (
+            r"(?:substitutions?|unavailable products?|refunds?|vouchers?|bag returns?)\s*:?"
+        )
+        remaining_text = " ".join(remaining.get_text(" ", strip=True).split())
+        remaining_text = remaining_text.replace(
+            "Your order doesn’t have any substitutions, everything’s present and correct.", ""
+        )
+        # Policy paragraphs mention refunds/bag returns even when none occurred.
+        # Reject actual sections and positive order-specific substitution wording.
+        if any(
+            re.fullmatch(unsupported_label, node.get_text(" ", strip=True), re.I)
+            for node in remaining.find_all(["h1", "h2", "h3", "h4", "caption", "th", "td", "p"])
+        ) or re.search(r"\byour order\b[^.]{0,100}\bsubstitutions?\b", remaining_text, re.I):
             raise ParseError("unsupported_adjustment_structure")
         summary = {}
         for row in soup.find_all("tr"):
@@ -116,6 +138,12 @@ class OcadoParser:
             cells = row.find_all(["td", "th"], recursive=False)
             texts = [" ".join(c.get_text(" ", strip=True).split()) for c in cells]
             if not texts:
+                continue
+            if texts[0].startswith("Sub total:"):
+                inline = INLINE_SUMMARY.fullmatch(texts[0]) if len(texts) == 1 else None
+                if inline is None or summary:
+                    raise ParseError("malformed_or_duplicate_summary")
+                summary.update({key: money(value) for key, value in inline.groupdict().items()})
                 continue
             label = texts[0].casefold().rstrip(":")
             key = LABELS.get(label)

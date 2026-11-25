@@ -19,15 +19,20 @@ Dry-run requires no credentials and writes neither database nor archive. Add
 
 ## Supported source and decisions
 
-The original private sample is not in this repository. The fixture is synthetic:
-it reproduces the documented product-table structure, five representative rows,
-30 lines, 34 units and documented monetary totals; the remaining names and values
-are synthetic. Summary labels and ISO explicit date wording are adapter contracts,
-not verified against the unavailable original HTML. Review a real sample privately
-before backfilling. Unknown monetary table rows and unsupported adjustment/substitution wording outside
-the product table fail for review, including explanatory wording requiring review. Only `delivery is
-today`/`delivery today` with a timezone-aware source timestamp, or an explicit
-`delivery date: YYYY-MM-DD` / `delivery on YYYY-MM-DD`, are supported.
+The supplied Ocado email now has a sanitised regression fixture at
+`tests/fixtures/ocado_upcoming_sanitised.eml`. It preserves the real HTML layout,
+30 product rows, one-cell summary and quoted-printable encoding, while replacing
+personal details and removing links/tracking resources. The original is retained
+locally in ignored `tests/private/ocado_upcoming_original.eml` with private
+permissions. See `tests/fixtures/README.md` for fixture provenance.
+
+The parser supports the observed “receipt for order …” reference, “order today”
+date wording, and negative offers savings displayed in the summary. It uses the
+timezone-aware source timestamp for “today”. The earlier synthetic two-column
+summary fixture and explicit ISO date contracts remain covered. Unknown monetary
+summary fields and actual substitution/adjustment sections fail for review;
+no-substitutions statements and general refund policy text do not imply changes
+to an order. Only this supplied upcoming-delivery layout has real-email coverage.
 
 The line prices already include offers. Quantity is never multiplied into them;
 savings are never deducted twice. All money is integer pence, parsed with Decimal.
@@ -278,16 +283,20 @@ permissions and recovery tests. They must never point at production.
 
 ## Remaining acceptance work
 
-Phases 1–5 are implemented for the documented synthetic source contract. A live
-server was not supplied. Before production: privately verify the exact original
-summary labels/date prose, run a small credentialed Fastmail dry-run, review failed
-layouts, backfill, deploy to the target host and create dashboards. The sample's
-private HTML structure beyond `productTable` could not be verified. Phase 6 remains
-future work requiring real receipt/substitution/refund/voucher/bag-return examples.
+Phases 1–5 are implemented, with regression coverage for the supplied real
+upcoming-delivery format. Before production: run a small credentialed Fastmail
+dry-run, review failed historical layouts, backfill, deploy to the target host
+and create dashboards. Phase 6 remains future work requiring real
+receipt/substitution/refund/voucher/bag-return examples.
 
-Verification on aarch64-linux: 51 tests passed with disposable PostgreSQL, including
+Initial MVP verification on aarch64-linux: 51 tests passed with disposable PostgreSQL, including
 actual database roles and dump/archive restoration. `nix flake check -L` and
 `nix develop --command python --version` passed. The built Nix CLI migrated an
 empty DB, imported the synthetic fixture twice (one order/30 lines/9291 pence),
 classified five products, and reported no failed/pending sources. x86_64-linux
 is exposed by the flake but was not built on this host.
+
+After adding the real-email fixture: 49 offline tests pass, including the real
+format and seven invalid/unsupported variants. Ten PostgreSQL integration tests
+are skipped without a running test database. The original private email was also
+parsed locally and reconciles to the same 30 lines, 34 units and 9291 pence.
