@@ -108,3 +108,29 @@ Integration references checked during implementation:
 [Email/query and Email/get (RFC 8621)](https://www.rfc-editor.org/rfc/rfc8621.html).
 Live import/backfill has not run: supply private credentials and review a small
 real sample before using historical import.
+
+## Categories
+
+```
+uv run household-purchases classify --limit 100
+uv run household-purchases categories list
+uv run household-purchases products uncategorised
+uv run household-purchases products set-category 123 drinks.soft-drinks
+uv run household-purchases products set-category 123 -
+```
+
+Rules classify only unclassified products; existing decisions are preserved.
+Manual assignments update every historical analytical row through catalogue joins.
+`-` clears a category and keeps that manual decision during future classification.
+Uncategorised differs from the deliberate `Other` category. Two-level taxonomy
+slugs are seeded by migration; edit category labels/descriptions with the schema
+owner, retaining stable slugs. A trigger rejects cycles/deeper hierarchies.
+
+The optional model is disabled by default. Set `LLM_ENABLED=true`, `LLM_MODEL`,
+and optionally `LLM_BASE_URL` (default `http://127.0.0.1:8080/v1`) and
+`LLM_API_KEY_FILE`. Configure a trusted local endpoint; only product names and the
+allowed taxonomy are submitted. JSON schema requests and independent local
+validation reject invented slugs and malformed responses. Each request times out
+after 15 seconds; a command handles at most 1000 products (default 100). Failures
+leave products unclassified. Financial ingestion never calls the model; run
+classification separately. No brand, SKU or pack-size guesses are stored.

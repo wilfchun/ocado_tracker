@@ -9,11 +9,12 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from household_purchases.categorisation import LocalClassifier, classify, set_category
 from household_purchases.config import Settings, secret_file
 from household_purchases.db import engine_for
 from household_purchases.email.fastmail import FastmailClient
 from household_purchases.ingestion import Ingestor
-from household_purchases.models import Order, Product, ScanState, SourceMessage
+from household_purchases.models import Category, Order, Product, ScanState, SourceMessage
 from household_purchases.parsers.base import ParseError
 from household_purchases.parsers.ocado import OcadoParser
 from household_purchases.sync import scan
@@ -35,6 +36,15 @@ def arguments() -> argparse.ArgumentParser:
         remote.add_argument("--since", type=date.fromisoformat)
         remote.add_argument("--until", type=date.fromisoformat)
         remote.add_argument("--dry-run", action="store_true")
+    categorise = sub.add_parser("classify")
+    categorise.add_argument("--limit", type=int, default=100)
+    categories = sub.add_parser("categories").add_subparsers(dest="action", required=True)
+    categories.add_parser("list")
+    products = sub.add_parser("products").add_subparsers(dest="action", required=True)
+    products.add_parser("uncategorised")
+    manual = products.add_parser("set-category")
+    manual.add_argument("product_id", type=int)
+    manual.add_argument("slug", help="Category slug or '-' to clear and preserve unclassified")
     return parser
 
 
@@ -128,6 +138,39 @@ def execute(args: argparse.Namespace, settings: Settings) -> int:
                     select(func.count()).select_from(Product).where(Product.category_id.is_(None))
                 )
                 print(f"uncategorised={count}")
+            return 0
+        if args.command == "classify":
+            llm = None
+            try:
+                if os.environ.get("LLM_ENABLED", "false").lower() == "true":
+                    model = os.environ.get("LLM_MODEL")
+                    if not model:
+                        raise ValueError("llm_model_required")
+                    llm = LocalClassifier(
+                        os.environ.get("LLM_BASE_URL", "http://127.0.0.1:8080/v1"),
+                        model,
+                        secret_file("LLM_API_KEY_FILE"),
+                    )
+                counts = classify(engine, limit=args.limit, llm=llm)
+                print(" ".join(f"{key}={value}" for key, value in counts.items()))
+                return 0
+            finally:
+                if llm:
+                    llm.close()
+        if args.command == "categories":
+            with Session(engine) as session:
+                for category in session.scalars(select(Category).order_by(Category.slug)):
+                    print(f"{category.slug}\t{category.name}")
+            return 0
+        if args.command == "products":
+            if args.action == "set-category":
+                set_category(engine, args.product_id, None if args.slug == "-" else args.slug)
+            else:
+                with Session(engine) as session:
+                    for product in session.scalars(
+                        select(Product).where(Product.category_id.is_(None)).order_by(Product.id)
+                    ):
+                        print(f"{product.id}\t{product.name}")
             return 0
         raise ValueError("unknown_command")
     finally:
