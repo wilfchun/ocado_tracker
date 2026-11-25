@@ -3,12 +3,13 @@
 Only explicit, tested label aliases are supported. Real historical templates must
 be reviewed before extending this adapter; unknown summary rows fail closed.
 """
+
+import re
 from datetime import datetime
 from decimal import Decimal
 from email import policy
 from email.parser import BytesParser
 from email.utils import parsedate_to_datetime
-import re
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
@@ -59,7 +60,11 @@ class OcadoParser:
         if len(tables) != 1:
             raise ParseError("missing_or_duplicate_product_table")
         rows = tables[0].find_all("tr")
-        if not rows or [c.get_text(" ", strip=True) for c in rows[0].find_all("th")] != ["Product", "Quantity", "Price to pay (£)"]:
+        if not rows or [c.get_text(" ", strip=True) for c in rows[0].find_all("th")] != [
+            "Product",
+            "Quantity",
+            "Price to pay (£)",
+        ]:
             raise ParseError("unexpected_product_headers")
         items = []
         for row in rows[1:]:
@@ -69,19 +74,26 @@ class OcadoParser:
             name, quantity, price = [" ".join(c.get_text(" ", strip=True).split()) for c in cells]
             if not re.fullmatch(r"[1-9]\d*", quantity) or not name:
                 raise ParseError("invalid_product")
-            items.append(ParsedPurchaseItem(name=name, quantity=int(quantity), line_total_pence=money(price)))
+            items.append(
+                ParsedPurchaseItem(name=name, quantity=int(quantity), line_total_pence=money(price))
+            )
         prose = soup.get_text(" ", strip=True)
-        refs = re.findall(r"\border (?:reference|number)\s*[:#]?\s*([A-Za-z0-9-]+)", prose, re.I)
+        refs = re.findall(
+            r"\border (?:reference|number)\s*[:#]?\s*([A-Za-z0-9-]+)", prose, re.IGNORECASE
+        )
         if len(set(refs)) != 1:
             raise ParseError("missing_or_ambiguous_order_reference")
         # Do not infer arbitrary date prose. Only these two documented forms.
-        explicit = re.findall(r"\bdelivery (?:date|on)\s*:?\s*(\d{4}-\d{2}-\d{2})\b", prose, re.I)
+        explicit = re.findall(
+            r"\bdelivery (?:date|on)\s*:?\s*(\d{4}-\d{2}-\d{2})\b", prose, re.IGNORECASE
+        )
         if explicit:
             from datetime import date
+
             if len(set(explicit)) != 1:
                 raise ParseError("ambiguous_delivery_date")
             delivery_date = date.fromisoformat(explicit[0])
-        elif re.search(r"\bdelivery\s+(?:is\s+)?today\b", prose, re.I):
+        elif re.search(r"\bdelivery\s+(?:is\s+)?today\b", prose, re.IGNORECASE):
             timestamp = received_at or parsedate_to_datetime(str(message.get("Date", "")))
             if timestamp.tzinfo is None:
                 raise ParseError("naive_message_timestamp")
@@ -107,5 +119,10 @@ class OcadoParser:
         if set(summary) != set(LABELS.values()):
             raise ParseError("missing_summary_fields")
         total = summary.pop("total_pence")
-        return ParsedOrder(order_reference=refs[0], delivery_date=delivery_date,
-                           items=tuple(items), charges=OrderCharges(**summary), total_pence=total)
+        return ParsedOrder(
+            order_reference=refs[0],
+            delivery_date=delivery_date,
+            items=tuple(items),
+            charges=OrderCharges(**summary),
+            total_pence=total,
+        )

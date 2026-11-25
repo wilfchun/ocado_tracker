@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Protocol
+
 from household_purchases.schemas import ParsedOrder
 
 

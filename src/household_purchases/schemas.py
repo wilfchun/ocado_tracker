@@ -1,6 +1,6 @@
+import unicodedata
 from datetime import date
 from typing import Literal
-import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -47,6 +47,13 @@ class ParsedOrder(Contract):
         c = self.charges
         if c.gross_subtotal_pence - c.offer_savings_pence != self.product_total_pence:
             raise ValueError("subtotal_mismatch")
-        if self.product_total_pence + c.delivery_charge_pence + c.bag_charge_pence + c.small_order_charge_pence + (c.other_adjustments_pence or 0) != self.total_pence:
+        if (
+            self.product_total_pence
+            + c.delivery_charge_pence
+            + c.bag_charge_pence
+            + c.small_order_charge_pence
+            + (c.other_adjustments_pence or 0)
+            != self.total_pence
+        ):
             raise ValueError("total_mismatch")
         return self
